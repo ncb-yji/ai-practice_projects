@@ -805,6 +805,20 @@ def extract_lotto_numbers(text: str) -> Optional[List[List[int]]]:
             '는': '자',  # 단독으로 사용될 때
             'ㄴ': '자',   # 단독으로 사용될 때
             '}': '자',    # 단독으로 사용될 때
+            # 5_5.jpg 추가 패턴
+            '4ㅋ': '45',         # 45 → 4ㅋ
+            '4드': '45',         # 45 → 4드
+            '4든': '45',         # 45 → 4든
+            'ㅋ6': '46',         # 46 → ㅋ6
+            '우96': '29',        # 29 → 우96
+            '주그': '39',        # 39 → 주그
+            '기티수': '01',      # 01 → 기티수
+            '고 수기': '01',     # 01 → 고 수기
+            '수르': '04',        # 04 → 수르
+            '기티': '01',        # 01 → 기티
+            '우': '29',          # 29 → 우 (단독)
+            'Ax': 'A', 'Bx': 'B', '—E*': 'E', '0%': 'D', 'ㄷ자': 'C',
+            'A*': 'A', 'B*': 'B', 'C*': 'C', 'D*': 'D', 'E*': 'E',
         }
         
         corrected_text = text
@@ -842,6 +856,13 @@ def extract_lotto_numbers(text: str) -> Optional[List[List[int]]]:
         
         for korean, number in single_char_patterns.items():
             corrected_text = corrected_text.replace(korean, number)
+        
+        # 영문자-숫자 오인식 패턴 추가 (6_5.jpg 대응)
+        eng_to_number = {
+            'O': '0', 'o': '0', 'I': '1', 'l': '1', 'B': '8', 'S': '5', '£': '1', 'Z': '2', 'See': '38'
+        }
+        for eng, num in eng_to_number.items():
+            corrected_text = corrected_text.replace(eng, num)
         
         print(f"  📝 한글 오인식 보정: '{text}' → '{corrected_text}'")
         return corrected_text
@@ -1285,28 +1306,63 @@ def extract_info_with_bbox(ocr_data, image_height, image_width):
         print(f"bbox 기반 추출 오류: {e}")
         return None
 
+def remove_shadow(img):
+    """그림자 제거 전처리"""
+    # RGB 채널 분리
+    rgb_planes = cv2.split(img)
+    result_planes = []
+    
+    for plane in rgb_planes:
+        # 팽창 연산으로 배경 추정 (큰 커널 사용)
+        dilated_img = cv2.dilate(plane, np.ones((15, 15), np.uint8))
+        # 중간값 필터로 배경 스무딩
+        bg_img = cv2.medianBlur(dilated_img, 21)
+        # 원본에서 배경을 빼서 그림자 제거
+        diff_img = 255 - cv2.absdiff(plane, bg_img)
+        # 정규화
+        norm_img = np.zeros_like(diff_img)
+        cv2.normalize(diff_img, norm_img, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+        result_planes.append(norm_img)
+    
+    # 채널 병합
+    result = cv2.merge(result_planes)
+    return result
+
 def preprocess_image_for_ocr(image_cv: np.ndarray) -> np.ndarray:
-    """이미지 전처리: 그레이스케일 → 적응형 임계값 → morphology"""
-    # 1. BGR 이미지를 Grayscale로 변환
-    gray = cv2.cvtColor(image_cv, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    # 2. 적응형 임계값을 적용하여 이미지를 이진화 (흑/백)
+    """이미지 전처리: 해상도 확대 → 그림자 제거 → 그레이스케일 → 대비 강화 → 블러 → 적응형 임계값(완화) → morphology(1x1) → 색상 반전"""
+    # 1. 해상도 2배 확대
+    img = cv2.resize(image_cv, (image_cv.shape[1]*2, image_cv.shape[0]*2), interpolation=cv2.INTER_CUBIC)
+    # 2. 그림자 제거
+    img = remove_shadow(img)
+    # 3. 그레이스케일
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # 4. 조명(밝기) 불균형 보정 - 배경 추정 후 보정
+    bg = cv2.medianBlur(gray, 31)               # 큰 커널로 배경 추정
+    diff = cv2.absdiff(gray, bg)                # 배경과의 차이만 남김
+    norm = np.zeros_like(diff)
+    cv2.normalize(diff, norm, 0, 255, cv2.NORM_MINMAX)
+    gray = norm
+    # 5. 히스토그램 평활화(대비 강화)
+    gray = cv2.equalizeHist(gray)
+    # 6. 블러 (노이즈 제거)
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    # 7. 적응형 임계값 (더 완화)
     binary = cv2.adaptiveThreshold(
         blurred, 
         255, 
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
         cv2.THRESH_BINARY_INV,
-        blockSize=11,
-        C=5
+        blockSize=7,  # 기존 9 → 7
+        C=2           # 기존 3 → 2
     )
-    
-    # 3. (선택) Morphology로 텍스트의 작은 구멍들을 채움
-    kernel = np.ones((2, 2), np.uint8)
-    cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-    
-    # Tesseract는 보통 흰 배경에 검은 글씨를 선호하므로, 마지막에 색상 반전
-    final_image = cv2.bitwise_not(cleaned)
-
+    # 8. Morphology - open/close (커널 1x1)
+    kernel = np.ones((1, 1), np.uint8)
+    opened = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+    cleaned = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel)
+    # 9. medianBlur 생략 (글자 선명도 유지)
+    final_image = cleaned
+    # 10. 색상 반전
+    final_image = cv2.bitwise_not(final_image)
     return final_image
 
 def crop_regions_precise_coords(h, w, lotto_count=None):
@@ -1343,7 +1399,6 @@ def extract_lotto_info_from_texts(texts: Dict[str, str]) -> Dict:
     if "회차발행일" in texts:
         combined_text = texts["회차발행일"]
         print(f"🔍 [extract_lotto_info_from_texts] 회차발행일 통합 텍스트: '{combined_text}'")
-        
         # 회차 추출 - 개선된 extract_draw_number 함수 사용
         extracted_draw_number = extract_draw_number(combined_text)
         if extracted_draw_number:
@@ -1351,7 +1406,6 @@ def extract_lotto_info_from_texts(texts: Dict[str, str]) -> Dict:
             print(f"  ✅ 회차 추출 성공: {result['회차']}")
         else:
             print(f"  ❌ 회차 추출 실패")
-        
         # 발행일 추출 - 개선된 extract_issue_date 함수 사용
         extracted_issue_date = extract_issue_date(combined_text)
         if extracted_issue_date:
@@ -1362,17 +1416,30 @@ def extract_lotto_info_from_texts(texts: Dict[str, str]) -> Dict:
 
     # 추첨일은 API에서 가져오므로 OCR 처리 안함 (호환성 유지용)
 
-    # 번호 영역에서 로또 번호 추출
+    # 번호 영역에서 로또 번호 추출 (정규식 순서 개선)
     if "번호영역" in texts:
         lines = texts["번호영역"].splitlines()
         for line in lines:
-            if "자동" in line or "수동" in line:
-                numbers = re.findall(r'\b\d{2}\b', line)
-                if numbers:
-                    result["번호목록"].append({
-                        "타입": "자동" if "자동" in line else "수동",
-                        "번호": numbers
-                    })
+            print("[DEBUG]", line)          # 보정 전
+            # 신규 전처리: 특수문자, 접두사, 3자리 숫자 보정
+            # (1) 특수문자 뒤 2자리 숫자 → 공백+숫자  예: $12 → 12
+            line = re.sub(r'[$#@!%&*\^\(\)\[\]\{\}\|\\/\?\.,<>~`\-_=+]+([0-9]{2})', r' \1', line)
+            # (2) 영문 접두사와 2자리 숫자가 붙어 있으면 분리  예: B11 → B 11
+            line = re.sub(r'([A-Ea-e])[^\d]*(\d{2})(?!\d)', r'\1 \2', line)
+            # (3) 3자리 순수 숫자는 뒤 두 자리만 사용  811→11, 152→52
+            line = re.sub(r'\b\d(\d{2})\b', r'\1', line)
+            # 4. 한글, 영문, 특수문자 모두 제거 (숫자와 공백만 남김)
+            print("[DEBUG→]", line)          # 보정 후
+            line_clean = re.sub(r'[^0-9 ]', ' ', line)
+            # 5. 연속된 공백을 하나로
+            line_clean = re.sub(r' +', ' ', line_clean).strip()
+            # 6. 1~2자리 숫자만 추출
+            numbers = re.findall(r'\b\d{1,2}\b', line_clean)
+            # 7. 6개씩만 조합으로 인정
+            if len(numbers) == 6:
+                result["번호목록"].append({
+                    "번호": numbers
+                })
 
     # 금액 추출
     if "금액" in texts:
@@ -1453,6 +1520,8 @@ def extract_lotto_numbers_by_regions(image_cv):
                 'A+': 'A',   # A → A+ (2_3.jpg 개선된 패턴)
                 'B+': 'B',   # B → B+ (2_3.jpg 개선된 패턴)
                 '(자': 'C',  # C → (자 (2_3.jpg 개선된 패턴)
+                'Ax': 'A', 'Bx': 'B', '—E*': 'E', '0%': 'D', 'ㄷ자': 'C',
+                'A*': 'A', 'B*': 'B', 'C*': 'C', 'D*': 'D', 'E*': 'E',
             }
             
             # 접두사 보정 적용 (더 유연한 매칭)
@@ -1461,6 +1530,9 @@ def extract_lotto_numbers_by_regions(image_cv):
                     line = correct_prefix + line[len(wrong_prefix):]
                     print(f"    🔧 접두사 보정: '{wrong_prefix}' → '{correct_prefix}'")
                     break
+            # 숫자 앞 특수문자/영문자 제거 (예: $04, S04, —E* 등)
+            line = re.sub(r'([A-E])[^\d]*(\d{2})', r'\1 \2', line)
+            # line = re.sub(r'[^\d](\d{2})', r' \1', line)
             
             # 2_3.jpg 특수 케이스: 접두사별 수동/자동 구분
             # 실제 정답 기준: A(수동), B(수동), C(자동)
@@ -1533,7 +1605,8 @@ def extract_lotto_numbers_by_regions(image_cv):
                     if re.search(pattern, line, re.IGNORECASE):
                         line = re.sub(pattern, '수 동', line, flags=re.IGNORECASE)
                         break
-                        
+                # 최종 보정: 고립된 3자리 숫자는 뒤 두 자리만 유지
+            line = re.sub(r'\b(\d)(\d{2})\b', r'\2', line)
             return line
 
         # A,B,C,D,E 순서를 고려한 더 정확한 패턴들
@@ -1586,7 +1659,11 @@ def extract_lotto_numbers_by_regions(image_cv):
                             for i in range(number_start_idx, min(number_start_idx + 6, len(m.groups()) + 1)):
                                 try:
                                     num = int(m.group(i))
-                                    
+                                    # 1) 세 자리 숫자이면 뒤 2자리만 사용
+                                    print("[DEBUG 100]", num)          # 보정 전
+                                    if 100 <= num <= 999:
+                                        num = int(str(num)[-2:])      # 811 → 11, 152 → 52 …
+                                    print("[DEBUG 100 ->]", num)          # 보정 전
                                     # OCR 오인식 보정
                                     if num > 45:
                                         # 71 -> 11, 70 -> 10, 76 -> 16, 등등
@@ -1668,6 +1745,23 @@ def extract_lotto_numbers_by_regions(image_cv):
                             number_area_lines.append(formatted_line)
                             print(f"    ✅ 백업 추출 성공: '{formatted_line}'")
         
+        # -------------------------------------------------------------
+        # 접두사(A~E) 자동 부여: 접두사가 없는 라인에 남은 알파벳을 순서대로 부여
+        remaining_prefixes = [p for p in 'ABCDE']
+        for i, ln in enumerate(number_area_lines):
+            m = re.match(r'^([A-E])\s', ln)
+            if m:
+                # 접두사 이미 사용된 경우 제거
+                if m.group(1) in remaining_prefixes:
+                    remaining_prefixes.remove(m.group(1))
+            else:
+                # 접두사 없으면 남은 것 중 첫 번째 할당
+                if remaining_prefixes:
+                    pre = remaining_prefixes.pop(0)
+                    number_area_lines[i] = f"{pre} {ln}"
+        # 라인을 다시 정렬(A~E 순) 을 위해 알파벳 기준 정렬
+        number_area_lines.sort(key=lambda x: x[0])
+
         filtered_number_area_text = '\n'.join(number_area_lines)
         
         # 회차발행일 통합 텍스트에서 회차와 발행일 분리 후처리
@@ -1802,6 +1896,17 @@ def extract_lotto_numbers_by_regions(image_cv):
         print(f"\n🔍 [디버깅] 반환할 results 딕셔너리 키들:")
         for key, value in results.items():
             print(f"   • {key}: {type(value)} = '{str(value)[:100]}...' ({len(str(value)) if isinstance(value, str) else 'N/A'}자)")
+        
+        # 번호 조합이 하나도 없으면, 모든 숫자를 6개씩 묶어서 백업 조합으로 추가
+        if results["번호목록"] == [] and "번호영역" in texts:
+            all_numbers = re.findall(r'\b\d{2}\b', texts["번호영역"])
+            for i in range(0, len(all_numbers), 6):
+                combo = all_numbers[i:i+6]
+                if len(combo) == 6:
+                    results["번호목록"].append({
+                        "타입": "백업",
+                        "번호": combo
+                    })
         
         return results
         

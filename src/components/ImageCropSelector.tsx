@@ -74,7 +74,8 @@ const ImageCropSelector: React.FC<ImageCropSelectorProps> = ({
       const y = corner.y * scale;
       ctx.beginPath();
       ctx.arc(x, y, 8, 0, 2 * Math.PI);
-      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.stroke();
       ctx.fillStyle = '#ffffff';
       ctx.font = '12px Arial';
       ctx.fillText(`${index + 1}`, x + 12, y + 4);
