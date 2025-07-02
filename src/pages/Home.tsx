@@ -14,25 +14,26 @@ import { useNavigate } from 'react-router-dom';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import HistoryIcon from '@mui/icons-material/History';
 import AssessmentIcon from '@mui/icons-material/Assessment';
+import { getApiUrl } from '../config/api';
 
-interface LottoResult {
-  drwNo: number;
-  drwNoDate: string;
-  drwtNo1: number;
-  drwtNo2: number;
-  drwtNo3: number;
-  drwtNo4: number;
-  drwtNo5: number;
-  drwtNo6: number;
-  bnusNo: number;
-  firstWinamnt: number;
-  firstPrzwnerCo: number;
-  returnValue: string;
+interface LottoData {
+  draw_no: number;
+  draw_date: string;
+  numbers: number[];
+  bonus: number;
+  first_win_amount: number;
+  first_prize_winners: number;
+}
+
+interface ApiResponse {
+  success: boolean;
+  message: string;
+  data: LottoData | null;
 }
 
 const Home = () => {
   const navigate = useNavigate();
-  const [lottoResult, setLottoResult] = useState<LottoResult | null>(null);
+  const [lottoData, setLottoData] = useState<LottoData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,19 +46,51 @@ const Home = () => {
       setLoading(true);
       setError(null);
 
-      // 로컬 백엔드 API 호출
-      const response = await fetch('http://localhost:8000/api/latest-lotto');
+      const apiUrl = getApiUrl('/api/latest-lotto');
+      console.log('🔗 API 요청 URL:', apiUrl);
+      console.log('🚀 API 요청 시작...');
+
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      console.log('📊 응답 상태:', response.status, response.statusText);
+      console.log('📋 응답 헤더:', Object.fromEntries(response.headers.entries()));
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`HTTP error! status: ${response.status} ${response.statusText}`);
       }
       
-      const data: LottoResult = await response.json();
-      setLottoResult(data);
+      const result: ApiResponse = await response.json();
+      console.log('✅ API 응답 성공:', result);
+
+      if (result.success && result.data) {
+        setLottoData(result.data);
+        console.log('✅ 로또 데이터 설정 완료:', result.data);
+      } else {
+        throw new Error(result.message || '데이터를 가져오는데 실패했습니다.');
+      }
       
-    } catch (err) {
-      console.error('로또 정보 가져오기 실패:', err);
-      setError('로또 정보를 가져오는데 실패했습니다. 백엔드 서버가 실행 중인지 확인해주세요.');
+    } catch (err: any) {
+      console.error('❌ 로또 정보 가져오기 실패:', err);
+      console.error('❌ 오류 타입:', err.constructor.name);
+      console.error('❌ 오류 메시지:', err.message);
+      console.error('❌ 스택 트레이스:', err.stack);
+      
+      let errorMessage = '로또 정보를 가져오는데 실패했습니다.';
+      
+      if (err.name === 'TypeError' && err.message.includes('fetch')) {
+        errorMessage = '네트워크 연결 오류: 백엔드 서버(8000포트)에 연결할 수 없습니다.';
+      } else if (err.message.includes('HTTP error')) {
+        errorMessage = `서버 오류: ${err.message}`;
+      } else {
+        errorMessage = err.message || errorMessage;
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -105,14 +138,13 @@ const Home = () => {
               </Typography>
             )}
 
-            {lottoResult && !loading && !error && (
+            {lottoData && !loading && !error && (
               <Box>
                 <Typography variant="h6" gutterBottom align="center">
-                  {lottoResult.drwNo}회 ({lottoResult.drwNoDate})
+                  {lottoData.draw_no}회 ({lottoData.draw_date})
                 </Typography>
                 <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1, mb: 3, flexWrap: 'wrap' }}>
-                  {[lottoResult.drwtNo1, lottoResult.drwtNo2, lottoResult.drwtNo3, 
-                    lottoResult.drwtNo4, lottoResult.drwtNo5, lottoResult.drwtNo6].map((num) => (
+                  {lottoData.numbers.map((num) => (
                     <Chip
                       key={num}
                       label={num}
@@ -128,7 +160,7 @@ const Home = () => {
                   ))}
                   <Typography variant="h5" sx={{ mx: 1, fontWeight: 'bold' }}>+</Typography>
                   <Chip
-                    label={lottoResult.bnusNo}
+                    label={lottoData.bonus}
                     sx={{
                       backgroundColor: '#8e24aa',
                       color: 'white',
@@ -146,7 +178,7 @@ const Home = () => {
                       1등 당첨금
                     </Typography>
                     <Typography variant="h6" color="primary">
-                      {formatCurrency(lottoResult.firstWinamnt)}원
+                      {formatCurrency(lottoData.first_win_amount)}원
                     </Typography>
                   </Box>
                   <Box sx={{ textAlign: 'center' }}>
@@ -154,7 +186,7 @@ const Home = () => {
                       1등 당첨자
                     </Typography>
                     <Typography variant="h6" color="primary">
-                      {lottoResult.firstPrzwnerCo}명
+                      {lottoData.first_prize_winners}명
                     </Typography>
                   </Box>
                 </Box>

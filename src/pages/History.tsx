@@ -1,21 +1,27 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Container,
   Typography,
+  Paper,
+  Chip,
+  AppBar,
+  Toolbar,
+  IconButton,
+  Box,
+  Alert,
+  CircularProgress,
+  Card,
+  CardContent,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  Paper,
-  Chip,
-  AppBar,
-  Toolbar,
-  IconButton,
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useNavigate } from 'react-router-dom';
+import { getApiUrl } from '../config/api';
 
 // 요일 구하는 함수
 const getDayOfWeek = (dateString: string) => {
@@ -33,102 +39,207 @@ const getNumberColor = (num: number) => {
   return '#32CD32'; // 녹색
 };
 
-// 임시 데이터
-const mockData = [
-  {
-    id: 1,
-    round: 1000,
-    purchaseDate: '2024-03-16',
-    type: '자동',
-    numbers: [1, 2, 3, 4, 5, 6],
-    result: '미추첨',
-    prize: 0,
-  },
-  {
-    id: 2,
-    round: 999,
-    purchaseDate: '2024-03-09',
-    type: '수동',
-    numbers: [7, 14, 21, 28, 35, 42],
-    result: '3등',
-    prize: 1500000,
-  },
-  {
-    id: 3,
-    round: 998,
-    purchaseDate: '2024-03-02',
-    type: '자동',
-    numbers: [3, 8, 15, 22, 29, 36],
-    result: '5등',
-    prize: 5000,
-  },
-  {
-    id: 4,
-    round: 997,
-    purchaseDate: '2024-02-24',
-    type: '수동',
-    numbers: [2, 9, 16, 23, 30, 37],
-    result: '미당첨',
-    prize: 0,
-  },
-  {
-    id: 5,
-    round: 996,
-    purchaseDate: '2024-02-17',
-    type: '자동',
-    numbers: [4, 11, 18, 25, 32, 39],
-    result: '4등',
-    prize: 50000,
-  },
-  {
-    id: 6,
-    round: 995,
-    purchaseDate: '2024-02-10',
-    type: '수동',
-    numbers: [5, 12, 19, 26, 33, 40],
-    result: '미당첨',
-    prize: 0,
-  },
-  {
-    id: 7,
-    round: 994,
-    purchaseDate: '2024-02-03',
-    type: '자동',
-    numbers: [6, 13, 20, 27, 34, 41],
-    result: '5등',
-    prize: 5000,
-  },
-  {
-    id: 8,
-    round: 993,
-    purchaseDate: '2024-01-27',
-    type: '수동',
-    numbers: [8, 15, 22, 29, 36, 43],
-    result: '미당첨',
-    prize: 0,
-  },
-  {
-    id: 9,
-    round: 992,
-    purchaseDate: '2024-01-20',
-    type: '자동',
-    numbers: [9, 16, 23, 30, 37, 44],
-    result: '4등',
-    prize: 50000,
-  },
-  {
-    id: 10,
-    round: 991,
-    purchaseDate: '2024-01-13',
-    type: '수동',
-    numbers: [10, 17, 24, 31, 38, 45],
-    result: '미당첨',
-    prize: 0,
-  },
-].sort((a, b) => new Date(b.purchaseDate).getTime() - new Date(a.purchaseDate).getTime());
+interface SavedAnalysis {
+  id: string;
+  timestamp: string;
+  analysis_result: {
+    draw_number?: number;
+    issue_date?: string;
+    draw_date?: string;
+    payment_deadline?: string;
+    lotto_numbers: number[][];
+    amount: string[];
+  };
+}
+
+interface WinningNumbers {
+  draw_no: number;
+  numbers: number[];
+  bonus: number;
+  draw_date: string;
+}
+
+interface LottoApiResponse {
+  success: boolean;
+  draw_no: number;
+  numbers: number[];
+  bonus: number;
+  message?: string;
+}
 
 const History = () => {
   const navigate = useNavigate();
+  const [savedAnalyses, setSavedAnalyses] = useState<SavedAnalysis[]>([]);
+  const [winningNumbersCache, setWinningNumbersCache] = useState<Map<number, WinningNumbers>>(new Map());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // 저장된 분석 결과 가져오기
+      const analysesResponse = await fetch(getApiUrl('/api/saved-analyses'));
+      if (analysesResponse.ok) {
+        const analysesData = await analysesResponse.json();
+        const analyses = analysesData.analyses || [];
+        setSavedAnalyses(analyses);
+
+        // 각 분석 결과의 회차별 당첨 번호 조회
+        const uniqueDrawNumbers = new Set<number>();
+        analyses.forEach((analysis: SavedAnalysis) => {
+          if (analysis.analysis_result.draw_number) {
+            uniqueDrawNumbers.add(analysis.analysis_result.draw_number);
+          }
+        });
+
+        // 각 회차별 당첨 번호 조회
+        const winningCache = new Map<number, WinningNumbers>();
+        await Promise.all(
+          Array.from(uniqueDrawNumbers).map(async (drawNo) => {
+            try {
+              const lottoResponse = await fetch(getApiUrl(`/api/lotto/${drawNo}`));
+              if (lottoResponse.ok) {
+                const lottoData: LottoApiResponse = await lottoResponse.json();
+                if (lottoData.success) {
+                  winningCache.set(drawNo, {
+                    draw_no: lottoData.draw_no,
+                    numbers: lottoData.numbers,
+                    bonus: lottoData.bonus,
+                    draw_date: '' // API에서 제공되지 않으므로 빈 문자열
+                  });
+                }
+              }
+            } catch (err) {
+              console.log(`${drawNo}회차 당첨 번호 조회 실패:`, err);
+            }
+          })
+        );
+
+        setWinningNumbersCache(winningCache);
+      }
+
+    } catch (e: any) {
+      setError(e.message || '데이터를 불러올 수 없습니다.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 당첨 확인 함수
+  const checkWinning = (userNumbers: number[], winningNumbers: number[], bonus: number) => {
+    const matches = userNumbers.filter(num => winningNumbers.includes(num)).length;
+    const bonusMatch = userNumbers.includes(bonus);
+    
+    if (matches === 6) return { rank: 1, prize: '1등' };
+    if (matches === 5 && bonusMatch) return { rank: 2, prize: '2등' };
+    if (matches === 5) return { rank: 3, prize: '3등' };
+    if (matches === 4) return { rank: 4, prize: '4등' };
+    if (matches === 3) return { rank: 5, prize: '5등' };
+    return { rank: 0, prize: '미당첨' };
+  };
+
+  // 통계 계산 - 구매 횟수는 번호 조합의 개수로 계산
+  const getStatistics = () => {
+    let totalNumbers = 0; // 총 번호 조합 개수 (= 구매 횟수)
+    let totalPurchases = savedAnalyses.length; // 총 구매 건수 (용지 개수)
+    
+    const totalAmount = savedAnalyses.reduce((sum, analysis) => {
+      const amount = analysis.analysis_result.amount[0] || '₩0';
+      const numericAmount = parseInt(amount.replace(/[₩,]/g, '')) || 0;
+      totalNumbers += analysis.analysis_result.lotto_numbers.length;
+      return sum + numericAmount;
+    }, 0);
+    
+    let winningCount = 0;
+    savedAnalyses.forEach(analysis => {
+      const drawNumber = analysis.analysis_result.draw_number;
+      if (drawNumber && winningNumbersCache.has(drawNumber)) {
+        const winning = winningNumbersCache.get(drawNumber)!;
+        analysis.analysis_result.lotto_numbers.forEach(numbers => {
+          const result = checkWinning(numbers, winning.numbers, winning.bonus);
+          if (result.rank > 0) winningCount++;
+        });
+      }
+    });
+
+    return { 
+      totalPurchases, // 용지 개수
+      totalNumbers,   // 번호 조합 개수 (= 구매 횟수)
+      totalAmount, 
+      winningCount 
+    };
+  };
+
+  // 테이블용 데이터 변환
+  const getTableData = () => {
+    const tableData: Array<{
+      id: string;
+      drawNumber: number | null;
+      purchaseDate: string;
+      type: string;
+      numbers: number[];
+      result: string;
+      prize: string;
+      resultColor: 'default' | 'error' | 'success';
+    }> = [];
+
+    savedAnalyses.forEach(analysis => {
+      const drawNumber = analysis.analysis_result.draw_number || null;
+      const purchaseDate = new Date(analysis.timestamp).toLocaleDateString('ko-KR');
+      
+      analysis.analysis_result.lotto_numbers.forEach((numbers, idx) => {
+        let winResult = null;
+        let resultColor: 'default' | 'error' | 'success' = 'default';
+        
+        if (drawNumber && winningNumbersCache.has(drawNumber)) {
+          const winning = winningNumbersCache.get(drawNumber)!;
+          winResult = checkWinning(numbers, winning.numbers, winning.bonus);
+          
+          // 추첨일이 지났는지 확인 (현재는 당첨 번호가 있으면 추첨 완료로 간주)
+          const isDrawn = true; // 당첨 번호 API에서 데이터를 받았다면 추첨 완료
+          
+          if (isDrawn) {
+            resultColor = winResult.rank > 0 ? 'success' : 'error';
+          }
+        }
+        
+        tableData.push({
+          id: `${analysis.id}-${idx}`,
+          drawNumber,
+          purchaseDate,
+          type: '자동', // OCR에서 자동/수동 구분이 어려우므로 기본값
+          numbers,
+          result: !drawNumber ? '회차 정보 없음' : 
+                  !winningNumbersCache.has(drawNumber) ? '미추첨' : 
+                  (winResult ? winResult.prize : '미당첨'),
+          prize: winResult && winResult.rank > 0 ? getPrizeAmount(winResult.rank) : '-',
+          resultColor
+        });
+      });
+    });
+
+    return tableData.sort((a, b) => (b.drawNumber || 0) - (a.drawNumber || 0));
+  };
+
+  // 등수별 당첨금 (예시)
+  const getPrizeAmount = (rank: number) => {
+    switch (rank) {
+      case 1: return '20억원';
+      case 2: return '6천만원';
+      case 3: return '150만원';
+      case 4: return '5만원';
+      case 5: return '5천원';
+      default: return '-';
+    }
+  };
+
+  const stats = getStatistics();
+  const tableData = getTableData();
 
   return (
     <>
@@ -150,136 +261,164 @@ const History = () => {
       </AppBar>
 
       <Container maxWidth="lg">
-        <TableContainer component={Paper} sx={{ mt: 2 }}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell 
-                  align="center" 
-                  sx={{ 
-                    width: '10%',
-                    fontSize: '1.1rem',
-                    fontWeight: 'bold',
-                    py: 2
-                  }}
-                >
-                  회차
-                </TableCell>
-                <TableCell 
-                  align="center" 
-                  sx={{ 
-                    width: '15%',
-                    fontSize: '1.1rem',
-                    fontWeight: 'bold',
-                    py: 2
-                  }}
-                >
-                  구매일
-                </TableCell>
-                <TableCell 
-                  align="center" 
-                  sx={{ 
-                    width: '10%',
-                    fontSize: '1.1rem',
-                    fontWeight: 'bold',
-                    py: 2
-                  }}
-                >
-                  구분
-                </TableCell>
-                <TableCell 
-                  align="center" 
-                  sx={{ 
-                    width: '35%',
-                    fontSize: '1.1rem',
-                    fontWeight: 'bold',
-                    py: 2
-                  }}
-                >
-                  번호
-                </TableCell>
-                <TableCell 
-                  align="center" 
-                  sx={{ 
-                    width: '15%',
-                    fontSize: '1.1rem',
-                    fontWeight: 'bold',
-                    py: 2
-                  }}
-                >
-                  결과
-                </TableCell>
-                <TableCell 
-                  align="center" 
-                  sx={{ 
-                    width: '15%',
-                    fontSize: '1.1rem',
-                    fontWeight: 'bold',
-                    py: 2
-                  }}
-                >
-                  당첨금
-                </TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {mockData.map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell align="center">{row.round}회</TableCell>
-                  <TableCell align="center">
-                    {row.purchaseDate} ({getDayOfWeek(row.purchaseDate)})
-                  </TableCell>
-                  <TableCell align="center">
-                    <Chip
-                      label={row.type}
-                      color={row.type === '자동' ? 'primary' : 'secondary'}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell align="center">
-                    {row.numbers.map((num) => (
-                      <Chip
-                        key={num}
-                        label={num}
-                        size="small"
-                        sx={{
-                          m: 0.5,
-                          backgroundColor: getNumberColor(num),
-                          color: num <= 30 ? 'white' : 'black',
-                          fontWeight: 'bold',
-                        }}
-                      />
-                    ))}
-                  </TableCell>
-                  <TableCell align="center">
-                    <Typography
-                      sx={{
-                        color: row.result === '미추첨' 
-                          ? 'black' 
-                          : row.result === '미당첨' 
-                            ? '#FF0000' 
-                            : '#2E7D32',
-                        fontWeight: row.result === '미추첨' ? 'normal' : 'bold',
-                      }}
-                    >
-                      {row.result}
-                    </Typography>
-                  </TableCell>
-                  <TableCell align="center">
-                    <Typography
-                      sx={{
-                        color: row.prize > 0 ? '#2E7D32' : 'black',
-                        fontWeight: row.prize > 0 ? 'bold' : 'normal',
-                      }}
-                    >
-                      {row.result === '미추첨' ? '-' : `${row.prize.toLocaleString()}원`}
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+        <Box sx={{ mt: 2 }}>
+          {loading && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+              <CircularProgress />
+              <Typography sx={{ ml: 2 }}>이력 불러오는 중...</Typography>
+            </Box>
+          )}
+
+          {error && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {error}
+            </Alert>
+          )}
+
+          {!loading && !error && (
+            <>
+              {/* 통계 카드 */}
+              <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
+                <Box sx={{ flex: 1, minWidth: 150 }}>
+                  <Card>
+                    <CardContent sx={{ textAlign: 'center' }}>
+                      <Typography variant="h4" color="primary">
+                        {stats.totalNumbers}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        총 구매 횟수
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Box>
+                <Box sx={{ flex: 1, minWidth: 150 }}>
+                  <Card>
+                    <CardContent sx={{ textAlign: 'center' }}>
+                      <Typography variant="h4" color="info.main">
+                        {stats.totalPurchases}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        총 구매 건수
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Box>
+                <Box sx={{ flex: 1, minWidth: 150 }}>
+                  <Card>
+                    <CardContent sx={{ textAlign: 'center' }}>
+                      <Typography variant="h4" color="success.main">
+                        ₩{stats.totalAmount.toLocaleString()}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        총 구매 금액
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Box>
+                <Box sx={{ flex: 1, minWidth: 150 }}>
+                  <Card>
+                    <CardContent sx={{ textAlign: 'center' }}>
+                      <Typography variant="h4" color="warning.main">
+                        {stats.winningCount}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        당첨 횟수
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Box>
+              </Box>
+
+              {tableData.length === 0 ? (
+                <Alert severity="info">
+                  저장된 구매 이력이 없습니다. 로또 용지를 분석하고 저장해보세요!
+                </Alert>
+              ) : (
+                <TableContainer component={Paper}>
+                  <Table>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell align="center" sx={{ fontWeight: 'bold', minWidth: 80 }}>
+                          회차
+                        </TableCell>
+                        <TableCell align="center" sx={{ fontWeight: 'bold', minWidth: 100 }}>
+                          구매일
+                        </TableCell>
+                        <TableCell align="center" sx={{ fontWeight: 'bold', minWidth: 80 }}>
+                          구분
+                        </TableCell>
+                        <TableCell align="center" sx={{ fontWeight: 'bold', minWidth: 280 }}>
+                          번호
+                        </TableCell>
+                        <TableCell align="center" sx={{ fontWeight: 'bold', minWidth: 80 }}>
+                          결과
+                        </TableCell>
+                        <TableCell align="center" sx={{ fontWeight: 'bold', minWidth: 100 }}>
+                          당첨금
+                        </TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {tableData.map((row) => (
+                        <TableRow key={row.id} hover>
+                          <TableCell align="center">
+                            {row.drawNumber ? `${row.drawNumber}회` : '-'}
+                          </TableCell>
+                          <TableCell align="center">
+                            {row.purchaseDate}
+                          </TableCell>
+                          <TableCell align="center">
+                            <Chip
+                              label={row.type}
+                              color="primary"
+                              size="small"
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center', flexWrap: 'wrap' }}>
+                              {row.numbers.map((num) => {
+                                // 당첨된 번호인지 확인
+                                let isWinningNumber = false;
+                                if (row.drawNumber && winningNumbersCache.has(row.drawNumber)) {
+                                  const winning = winningNumbersCache.get(row.drawNumber)!;
+                                  isWinningNumber = winning.numbers.includes(num) || winning.bonus === num;
+                                }
+                                
+                                return (
+                                  <Chip
+                                    key={num}
+                                    label={num}
+                                    size="small"
+                                    sx={{
+                                      backgroundColor: isWinningNumber ? '#1E90FF' : '#A9A9A9', // 당첨: 파란색, 미당첨: 회색
+                                      color: 'white',
+                                      fontWeight: 'bold',
+                                      minWidth: 32,
+                                    }}
+                                  />
+                                );
+                              })}
+                            </Box>
+                          </TableCell>
+                          <TableCell align="center">
+                            <Chip
+                              label={row.result}
+                              color={row.resultColor}
+                              size="small"
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            {row.prize}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </>
+          )}
+        </Box>
       </Container>
     </>
   );
