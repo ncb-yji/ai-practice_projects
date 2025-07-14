@@ -763,7 +763,7 @@ async def analyze_lotto_image(file: UploadFile = File(...)):
 
 def extract_lotto_numbers(text: str) -> Optional[List[List[int]]]:
     """텍스트에서 로또 번호 조합들을 추출합니다."""
-    
+    import re
     def fix_korean_ocr_errors(text: str) -> str:
         """한글 자음/모음 오인식을 숫자로 보정합니다."""
         # 3.jpg에서 발견된 오인식 패턴들
@@ -867,10 +867,8 @@ def extract_lotto_numbers(text: str) -> Optional[List[List[int]]]:
         print(f"  📝 한글 오인식 보정: '{text}' → '{corrected_text}'")
         return corrected_text
     
-    # 입력 텍스트의 한글 오인식 보정
     print(f"🔍 번호 추출 시작: '{text}'")
     corrected_text = fix_korean_ocr_errors(text)
-    
     lotto_combinations = []
     
     # 1. "자 동" 또는 "수 동" 다음에 나오는 6개 숫자 조합 찾기
@@ -928,7 +926,21 @@ def extract_lotto_numbers(text: str) -> Optional[List[List[int]]]:
                     lotto_combinations.append(combination)
             else:
                 print(f"    ❌ 숫자 개수 부족: {len(numbers)}개")
-    
+    # --- 각 줄에서 6개 이상의 1~45 숫자 추출 ---
+    print(f"  🔄 줄 단위 6개 이상 숫자 추출 시도")
+    lines = corrected_text.splitlines()
+    for line in lines:
+        numbers = re.findall(r'\b(0[1-9]|[1-9]|[1-3][0-9]|4[0-5])\b', line)
+        print(f"    줄: '{line}' → 추출된 숫자: {numbers}")
+        if len(numbers) >= 6:
+            combination = [int(num) for num in numbers[:6]]
+            if combination not in lotto_combinations:
+                print(f"    🎯 줄 단위 6개 이상 숫자 추출: {combination}")
+                lotto_combinations.append(combination)
+            else:
+                print(f"    ⚠️ 중복된 조합: {combination}")
+        else:
+            print(f"    ❌ 숫자 개수 부족: {len(numbers)}개")
     # 2. 구분자가 없는 경우 연속된 6개 숫자 패턴 찾기 (백업)
     if not lotto_combinations:
         print(f"  🔄 백업 패턴 시도 (연속된 6개 숫자)")
@@ -961,12 +973,7 @@ def extract_lotto_numbers(text: str) -> Optional[List[List[int]]]:
             print(f"      ✅ 유효한 조합으로 확정")
             filtered_combinations.append(combination)
         else:
-            print(f"      ❌ 유효하지 않은 조합으로 제외")
-    
-    print(f"  📊 최종 결과: {len(filtered_combinations)}개 조합 추출")
-    for i, combo in enumerate(filtered_combinations):
-        print(f"    {i+1}. {combo}")
-    
+            print(f"      ❌ 제외됨")
     return filtered_combinations if filtered_combinations else None
 
 def extract_currency_amount(text: str) -> Optional[str]:
@@ -1119,8 +1126,20 @@ def extract_draw_number(text: str) -> Optional[int]:
                     print(f"  ⚠️ OCR 오인식 패턴 {i+1}에서 연도로 추정되는 숫자 제외: {result}")
                     continue
                 
-                print(f"  ✅ OCR 오인식 패턴 {i+1} 매칭: '{match.group(0)}' → {result}")
-                return result
+                # 1과 7 혼동 보정 (예: 1778 → 1178)
+                corrected_result = result
+                if len(number_str) == 4:
+                    # 두 번째 자리가 7인 경우 1로 보정 시도
+                    if number_str[1] == '7':
+                        potential_correction = number_str[0] + '1' + number_str[2:]
+                        potential_num = int(potential_correction)
+                        # 보정된 숫자가 현재 로또 회차 범위에 있는지 확인
+                        if 1000 <= potential_num <= 1200:
+                            corrected_result = potential_num
+                            print(f"  🔧 1↔7 혼동 보정: {result} → {corrected_result}")
+                
+                print(f"  ✅ OCR 오인식 패턴 {i+1} 매칭: '{match.group(0)}' → {corrected_result}")
+                return corrected_result
     
     # 3. 백업: 3~4자리 숫자 찾기 (연도 제외 필터링)
     backup_numbers = re.findall(r'\b(\d{3,4})\b', text)
@@ -1132,10 +1151,19 @@ def extract_draw_number(text: str) -> Optional[int]:
             print(f"  ⚠️ 연도로 추정되는 숫자 제외: {num}")
             continue
             
+        # 1과 7 혼동 보정 (예: 1778 → 1178) - 백업 패턴에서도 적용
+        corrected_num = num
+        if len(number_str) == 4 and number_str[1] == '7':
+            potential_correction = number_str[0] + '1' + number_str[2:]
+            potential_num = int(potential_correction)
+            if 1000 <= potential_num <= 1200:
+                corrected_num = potential_num
+                print(f"  🔧 백업 패턴에서 1↔7 혼동 보정: {num} → {corrected_num}")
+            
         # 로또 회차 범위 (900~1200 정도)
-        if 900 <= num <= 1200:
-            print(f"  ⚠️ 백업 패턴 매칭: {num}")
-            return num
+        if 900 <= corrected_num <= 1200:
+            print(f"  ⚠️ 백업 패턴 매칭: {corrected_num}")
+            return corrected_num
     
     print(f"  ❌ 회차 추출 실패")
     return None
@@ -1509,116 +1537,49 @@ def extract_lotto_numbers_by_regions(image_cv):
         
         # 번호영역 OCR 원본 텍스트 후처리 및 유효 패턴만 추출
         def fix_auto_manual(line):
-            """자동/수동 구분자 및 접두사 오인식을 보정합니다."""
-            # A, B, C 접두사 오인식 보정 (2_3.jpg에서 발견된 패턴)
+            """접두사 오인식을 보정하고 숫자 패턴을 정리합니다."""
+            # A, B, C 접두사 오인식 보정
             prefix_corrections = {
                 '는': 'A',   # A → 는
                 'ㄴ': 'B',   # B → ㄴ  
                 '}': 'C',    # C → }
-                '£': 'A',    # A → £ (3.jpg 패턴)
-                'AK': 'A',   # A → AK (1.jpg 패턴)
-                'A+': 'A',   # A → A+ (2_3.jpg 개선된 패턴)
-                'B+': 'B',   # B → B+ (2_3.jpg 개선된 패턴)
-                '(자': 'C',  # C → (자 (2_3.jpg 개선된 패턴)
+                '£': 'A',    # A → £
+                'AK': 'A',   # A → AK
+                'A+': 'A',   # A → A+
+                'B+': 'B',   # B → B+
+                '(자': 'C',  # C → (자
                 'Ax': 'A', 'Bx': 'B', '—E*': 'E', '0%': 'D', 'ㄷ자': 'C',
                 'A*': 'A', 'B*': 'B', 'C*': 'C', 'D*': 'D', 'E*': 'E',
             }
             
-            # 접두사 보정 적용 (더 유연한 매칭)
+            # 접두사 보정 적용
             for wrong_prefix, correct_prefix in prefix_corrections.items():
                 if line.startswith(wrong_prefix + ' ') or line.startswith(wrong_prefix + '\t') or line.startswith(wrong_prefix):
                     line = correct_prefix + line[len(wrong_prefix):]
                     print(f"    🔧 접두사 보정: '{wrong_prefix}' → '{correct_prefix}'")
                     break
-            # 숫자 앞 특수문자/영문자 제거 (예: $04, S04, —E* 등)
-            line = re.sub(r'([A-E])[^\d]*(\d{2})', r'\1 \2', line)
-            # line = re.sub(r'[^\d](\d{2})', r' \1', line)
             
-            # 2_3.jpg 특수 케이스: 접두사별 수동/자동 구분
-            # 실제 정답 기준: A(수동), B(수동), C(자동)
-            if line.startswith('A ') or line.startswith('B '):
-                # A, B는 수동으로 처리
-                manual_patterns = [
-                    r'는\s*동', r'ㄴ\s*동', r'는 동', r'ㄴ 동',  # 오인식된 수동 패턴
-                    r'수동', r'수 동', r'수\s*동'  # 정상 수동 패턴
-                ]
-                for pattern in manual_patterns:
-                    if re.search(pattern, line, re.IGNORECASE):
-                        line = re.sub(pattern, '수 동', line, flags=re.IGNORECASE)
-                        break
-                # 패턴이 없으면 기본적으로 수동으로 간주
-                if not re.search(r'(수|자)\s*동', line):
-                    # 접두사 다음에 "동"이 있으면 수동으로 치환, 없으면 추가
-                    if re.search(r'^([ABC])\s*동', line):
-                        line = re.sub(r'^([ABC])\s*동', r'\1 수 동', line)
-                    else:
-                        line = re.sub(r'^([ABC])\s*', r'\1 수 동 ', line)
-                        
-            elif line.startswith('C '):
-                # C는 자동으로 처리
-                auto_patterns = [
-                    r'\}\s*동', r'} 동',  # 오인식된 자동 패턴
-                    r'자동', r'자 동', r'자\s*동'  # 정상 자동 패턴
-                ]
-                for pattern in auto_patterns:
-                    if re.search(pattern, line, re.IGNORECASE):
-                        line = re.sub(pattern, '자 동', line, flags=re.IGNORECASE)
-                        break
-                # 패턴이 없으면 기본적으로 자동으로 간주
-                if not re.search(r'(수|자)\s*동', line):
-                    # 접두사 다음에 "동"이 있으면 자동으로 치환, 없으면 추가
-                    if re.search(r'^([ABC])\s*동', line):
-                        line = re.sub(r'^([ABC])\s*동', r'\1 자 동', line)
-                    else:
-                        line = re.sub(r'^([ABC])\s*', r'\1 자 동 ', line)
-            else:
-                # 접두사가 없는 경우 기존 로직 사용
-                # 자동 관련 패턴들
-                auto_patterns = [
-                    r'04%', r'자\$', r'cz 동', r'DA', r'『자 등', r'자 등', r'자0', r'0동', 
-                    r'자동', r'자 동', r'자동', r'자\s*동', r'자\s*\$', r'자\s*%', 
-                    r'cz\s*동', r'DA\s*', r'『자\s*등', r'자\s*등', r'자\s*0', r'0\s*동',
-                    r'자\s*\d', r'\d\s*동', r'자\s*[^\w\s]', r'[^\w\s]\s*동',
-                    r'A\s*자', r'자\s*A', r'자\s*[가-힣]', r'[가-힣]\s*동',
-                    # 3.jpg에서 발견된 새로운 패턴들
-                    r'£', r'는\s*£', r'\.\s*£', r'\{\+\}\s*£', r'[는.{}\+]*\s*£',
-                    # 1.jpg에서 발견된 새로운 패턴들  
-                    r'AK\}\s*S', r'AK\}', r'AK', r'A\s*K', r'[A-Z]+\}\s*S', r'[A-Z]+\s*S',
-                    # 일반적인 자동 오인식 패턴
-                    r'\}\s*동', r'} 동'
-                ]
-                # 수동 관련 패턴들
-                manual_patterns = [
-                    r'수동', r'수 동', r'수\s*동', r'수\s*\$', r'수\s*%',
-                    r'수\s*0', r'0\s*동', r'수\s*[^\w\s]', r'[^\w\s]\s*동',
-                    r'는\s*동', r'ㄴ\s*동', r'는 동', r'ㄴ 동'
-                ]
-                
-                # 자동 패턴 치환
-                for pattern in auto_patterns:
-                    if re.search(pattern, line, re.IGNORECASE):
-                        line = re.sub(pattern, '자 동', line, flags=re.IGNORECASE)
-                        break
-                
-                # 수동 패턴 치환
-                for pattern in manual_patterns:
-                    if re.search(pattern, line, re.IGNORECASE):
-                        line = re.sub(pattern, '수 동', line, flags=re.IGNORECASE)
-                        break
-                # 최종 보정: 고립된 3자리 숫자는 뒤 두 자리만 유지
+            # 자동/수동 구분자 제거
+            line = re.sub(r'(자\s*동|수\s*동|자|수)', '', line)
+            
+            # 숫자 앞 특수문자/영문자 제거
+            line = re.sub(r'([A-E])[^\d]*(\d{2})', r'\1 \2', line)
+            
+            # 3자리 숫자는 뒤 2자리만 유지
             line = re.sub(r'\b(\d)(\d{2})\b', r'\2', line)
+            
             return line
 
-        # A,B,C,D,E 순서를 고려한 더 정확한 패턴들
+        # A,B,C,D,E 순서를 고려한 더 정확한 패턴들 (자동/수동 구분 제거)
         patterns = [
-            # A~E + 자동/수동 + 6개 숫자 (공백 구분)
-            r'([ABCDE])\s*(자\s*동|수\s*동)\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])',
-            # A~E + 자동/수동 + 6개 숫자 (혼합 패턴)
-            r'([ABCDE])\s*(자\s*동|수\s*동)\s*(\d{1,2})\s*(\d{1,2})\s*(\d{1,2})\s*(\d{1,2})\s*(\d{1,2})\s*(\d{1,2})',
-            # 자동/수동 + 6개 숫자 (A~E 없이, 기존 패턴)
-            r'(자\s*동|수\s*동)\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])',
-            # 자동/수동 + 6개 숫자 (혼합 패턴, A~E 없이)
-            r'(자\s*동|수\s*동)\s*(\d{1,2})\s*(\d{1,2})\s*(\d{1,2})\s*(\d{1,2})\s*(\d{1,2})\s*(\d{1,2})'
+            # A~E + 6개 숫자 (공백 구분)
+            r'([ABCDE])\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])',
+            # A~E + 6개 숫자 (혼합 패턴)
+            r'([ABCDE])\s*(\d{1,2})\s*(\d{1,2})\s*(\d{1,2})\s*(\d{1,2})\s*(\d{1,2})\s*(\d{1,2})',
+            # 6개 숫자만 (A~E 없이)
+            r'(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])\s*(0[1-9]|[1-3][0-9]|4[0-5])',
+            # 6개 숫자 (혼합 패턴)
+            r'(\d{1,2})\s*(\d{1,2})\s*(\d{1,2})\s*(\d{1,2})\s*(\d{1,2})\s*(\d{1,2})'
         ]
         
         number_area_lines = []
@@ -1644,15 +1605,13 @@ def extract_lotto_numbers_by_regions(image_cv):
                             has_prefix = pattern_idx < 2  # 첫 2개 패턴은 A~E 접두사 포함
                             
                             if has_prefix:
-                                # A~E 접두사가 있는 경우: 그룹 1은 접두사, 2는 자동/수동, 3~8은 숫자
+                                # A~E 접두사가 있는 경우: 그룹 1은 접두사, 2~7은 숫자
                                 prefix = m.group(1)
-                                type_group = m.group(2)
-                                number_start_idx = 3
-                            else:
-                                # A~E 접두사가 없는 경우: 그룹 1은 자동/수동, 2~7은 숫자
-                                prefix = ""
-                                type_group = m.group(1)
                                 number_start_idx = 2
+                            else:
+                                # A~E 접두사가 없는 경우: 그룹 1~6은 숫자
+                                prefix = ""
+                                number_start_idx = 1
                             
                             # 숫자 부분만 추출해서 01~45 범위 확인 (OCR 오인식 보정 포함)
                             numbers = []
@@ -1684,17 +1643,16 @@ def extract_lotto_numbers_by_regions(image_cv):
                             
                             # 정확히 6개 숫자가 있고 모두 유효한 범위인 경우만
                             if len(numbers) == 6:
-                                type_text = "자 동" if "자" in type_group else "수 동"
                                 if prefix:
-                                    formatted_line = f"{prefix} {type_text} {' '.join(numbers)}"
+                                    formatted_line = f"{prefix} {' '.join(numbers)}"
                                 else:
-                                    formatted_line = f"{type_text} {' '.join(numbers)}"
+                                    formatted_line = f"{' '.join(numbers)}"
                                 number_area_lines.append(formatted_line)
                                 print(f"    ✅ 번호 추출 성공: '{formatted_line}'")
                                 matched = True
                                 break
                     
-                    # 어떤 패턴도 매칭되지 않았지만 숫자가 6개 있는 경우 (백업)
+                    # 어떤 패턴도 매칭되지 않았지만 숫자가 6개 이상 있는 경우 (백업)
                     if not matched:
                         print(f"    ⚠️ 백업 패턴 시도")
                         # A~E 접두사 먼저 확인
@@ -1702,11 +1660,15 @@ def extract_lotto_numbers_by_regions(image_cv):
                         prefix = prefix_match.group(1) if prefix_match else ""
                         
                         # 더 넓은 범위에서 숫자를 찾고 보정 적용
-                        raw_numbers = re.findall(r'\b(\d{1,2})\b', fixed)
+                        raw_numbers = re.findall(r'\b(\d{1,3})\b', fixed)  # 3자리까지 포함
                         numbers = []
                         for num_str in raw_numbers:
                             try:
                                 num = int(num_str)
+                                
+                                # 3자리 숫자이면 뒤 2자리만 사용
+                                if 100 <= num <= 999:
+                                    num = int(str(num)[-2:])
                                 
                                 # OCR 오인식 보정 (메인 로직과 동일)
                                 if num > 45:
@@ -1721,26 +1683,19 @@ def extract_lotto_numbers_by_regions(image_cv):
                                 
                                 if 1 <= num <= 45:
                                     numbers.append(f"{num:02d}")
+                                    if len(numbers) == 6:  # 6개가 되면 중단
+                                        break
                             except ValueError:
                                 continue
                         
-                        if len(numbers) == 6:
-                            # 접두사별 자동/수동 구분 (2_3.jpg 특수 케이스 적용)
-                            if prefix in ['A', 'B']:
-                                type_text = "수 동"  # A, B는 수동
-                            elif prefix == 'C':
-                                type_text = "자 동"  # C는 자동  
-                            elif '자' in fixed:
-                                type_text = "자 동"
-                            elif '수' in fixed:
-                                type_text = "수 동"
-                            else:
-                                type_text = "자 동"  # 기본값
+                        if len(numbers) >= 6:  # 6개 이상이면 처음 6개 사용
+                            # 처음 6개만 사용
+                            numbers = numbers[:6]
                             
                             if prefix:
-                                formatted_line = f"{prefix} {type_text} {' '.join(numbers)}"
+                                formatted_line = f"{prefix} {' '.join(numbers)}"
                             else:
-                                formatted_line = f"{type_text} {' '.join(numbers)}"
+                                formatted_line = f"{' '.join(numbers)}"
                             
                             number_area_lines.append(formatted_line)
                             print(f"    ✅ 백업 추출 성공: '{formatted_line}'")
@@ -1847,24 +1802,19 @@ def extract_lotto_numbers_by_regions(image_cv):
             for i, line in enumerate(filtered_number_area_text.splitlines()):
                 if line.strip():
                     print(f"     라인 {i+1}: '{line.strip()}'")
-                    # "A 수 동 12 13 14 31 33 41" 형태에서 타입과 숫자 추출
+                    # "A 12 13 14 31 33 41" 형태에서 숫자 추출
                     numbers = re.findall(r'\b(\d{2})\b', line.strip())
                     print(f"       └ 추출된 숫자: {numbers}")
                     if len(numbers) == 6:
                         combo = [int(num) for num in numbers]
                         results['lotto_combinations'].append(combo)
                         
-                        # 타입 추출 (자 동 또는 수 동)
-                        type_match = re.search(r'(자\s*동|수\s*동)', line)
-                        type_text = type_match.group(1) if type_match else "자 동"
-                        
-                        # 번호목록에도 추가
+                        # 번호목록에도 추가 (타입 제거)
                         results['번호목록'].append({
-                            '타입': type_text,
                             '번호': [f"{num:02d}" for num in combo]
                         })
                         
-                        print(f"       ✅ 유효한 조합 추가: {combo} ({type_text})")
+                        print(f"       ✅ 유효한 조합 추가: {combo}")
                     else:
                         print(f"       ❌ 숫자가 6개가 아님: {len(numbers)}개")
         else:

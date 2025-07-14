@@ -517,48 +517,55 @@ const Capture = () => {
                 
                 {analysisResult && analysisResult.success && (
                   <>
-                    {/* 디버깅용: 두 개의 이미지 표시 */}
+                    {/* 분석 과정 이미지 - 나란히 표시 */}
                     <Box sx={{ mb: 3 }}>
                       <Typography variant="h6" gutterBottom>분석 과정 이미지</Typography>
                       
-                      {/* 기울기 보정만 된 원본 이미지 */}
-                      {analysisResult.transformed_image && (
-                        <Box sx={{ mb: 2 }} key={`transformed-${forceUpdateKey}`}>
-                          <Typography variant="subtitle1" gutterBottom color="primary">
-                            1. 기울기 보정된 원본 이미지
-                          </Typography>
-                          <img 
-                            key={`img-transformed-${forceUpdateKey}`}
-                            src={analysisResult.transformed_image} 
-                            alt="Transformed" 
-                            style={{ 
-                              maxWidth: '100%', 
-                              border: '2px solid #1976d2', 
-                              borderRadius: '4px',
-                              marginBottom: '16px'
-                            }} 
-                          />
-                        </Box>
-                      )}
-                      
-                      {/* OCR 전처리된 이미지 */}
-                      {analysisResult.corrected_image && (
-                        <Box sx={{ mb: 2 }} key={`corrected-${forceUpdateKey}`}>
-                          <Typography variant="subtitle1" gutterBottom color="secondary">
-                            2. OCR 전처리된 이미지
-                          </Typography>
-                          <img 
-                            key={`img-corrected-${forceUpdateKey}`}
-                            src={analysisResult.corrected_image} 
-                            alt="OCR Preprocessed" 
-                            style={{ 
-                              maxWidth: '100%', 
-                              border: '2px solid #d32f2f', 
-                              borderRadius: '4px'
-                            }} 
-                          />
-                        </Box>
-                      )}
+                      <Box sx={{ 
+                        display: 'grid', 
+                        gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, 
+                        gap: 2 
+                      }}>
+                        {/* 기울기 보정만 된 원본 이미지 */}
+                        {analysisResult.transformed_image && (
+                          <Box key={`transformed-${forceUpdateKey}`}>
+                            <Typography variant="subtitle1" gutterBottom color="primary">
+                              1. 기울기 보정된 원본 이미지
+                            </Typography>
+                            <img 
+                              key={`img-transformed-${forceUpdateKey}`}
+                              src={analysisResult.transformed_image} 
+                              alt="Transformed" 
+                              style={{ 
+                                width: '100%', 
+                                border: '2px solid #1976d2', 
+                                borderRadius: '4px',
+                                objectFit: 'contain'
+                              }} 
+                            />
+                          </Box>
+                        )}
+                        
+                        {/* OCR 전처리된 이미지 */}
+                        {analysisResult.corrected_image && (
+                          <Box key={`corrected-${forceUpdateKey}`}>
+                            <Typography variant="subtitle1" gutterBottom color="secondary">
+                              2. OCR 전처리된 이미지
+                            </Typography>
+                            <img 
+                              key={`img-corrected-${forceUpdateKey}`}
+                              src={analysisResult.corrected_image} 
+                              alt="OCR Preprocessed" 
+                              style={{ 
+                                width: '100%', 
+                                border: '2px solid #d32f2f', 
+                                borderRadius: '4px',
+                                objectFit: 'contain'
+                              }} 
+                            />
+                          </Box>
+                        )}
+                      </Box>
                     </Box>
                     
                     {/* 로또 용지 정보 */}
@@ -672,26 +679,7 @@ const Capture = () => {
                           )}
                   </Box>
 
-                        {/* ④ 번호 조합 영역 (A~E) */}
-                        {analysisResult.region_results.lotto_combinations && analysisResult.region_results.lotto_combinations.length > 0 && (
-                          <Box sx={{ mb: 2 }}>
-                            <Typography variant="subtitle1" gutterBottom>④ 번호 조합 영역 (A~E)</Typography>
-                            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 2 }}>
-                              {analysisResult.region_results.lotto_combinations.map((combination, index) => (
-                                <Box key={index} sx={{ p: 2, border: '1px solid #e0e0e0', borderRadius: 1, backgroundColor: '#f9f9f9' }}>
-                                  <Typography variant="subtitle2" sx={{ mb: 1, color: 'text.secondary' }}>
-                                    영역 {String.fromCharCode(65 + index)} (자동)
-                      </Typography>
-                                  <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                                    {combination.map((num) => (
-                                      <Chip key={num} label={num} color="primary" size="small" />
-                                    ))}
-                                  </Stack>
-                                </Box>
-                              ))}
-                            </Box>
-                          </Box>
-                        )}
+
                       </>
                     )}
 
@@ -702,7 +690,7 @@ const Capture = () => {
                         {analysisResult.extracted_combinations.map((combination, index) => (
                           <Box key={index} sx={{ mb: 2, p: 2, border: '1px solid #e0e0e0', borderRadius: 1, backgroundColor: '#f9f9f9' }}>
                             <Typography variant="subtitle2" sx={{ mb: 1, color: 'text.secondary' }}>
-                              조합 {index + 1} (자동)
+                              조합 {index + 1}
                           </Typography>
                             <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
                               {combination.map((num) => (
@@ -789,24 +777,7 @@ const Capture = () => {
 
                     <Typography variant="h6" gutterBottom>영역별 OCR 결과</Typography>
                     <Paper variant="outlined" sx={{ p: 2, maxHeight: 400, overflow: 'auto', backgroundColor: '#f5f5f5' }}>
-                      {/* 기본 OCR 결과 표시 */}
-                      {analysisResult.ocr_results && analysisResult.ocr_results.length > 0 && (
-                        <Box sx={{ mb: 3 }}>
-                          <Typography variant="subtitle1" color="primary" sx={{ mb: 2, fontWeight: 'bold' }}>
-                            📋 전체 이미지 OCR 결과
-                          </Typography>
-                          {analysisResult.ocr_results.map((text, index) => (
-                            <Box key={index} sx={{ mb: 1, p: 1.5, border: '1px solid #ddd', borderRadius: 1, backgroundColor: '#fff' }}>
-                              <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
-                                라인 {index + 1}:
-                              </Typography>
-                              <Typography variant="body2" sx={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
-                                {text || '(빈 텍스트)'}
-                              </Typography>
-                            </Box>
-                          ))}
-                        </Box>
-                      )}
+
 
                       {analysisResult.region_results ? (
                         <Box>
@@ -1178,9 +1149,8 @@ const Capture = () => {
                         <Typography color="text.secondary">영역별 OCR 결과가 없습니다.</Typography>
                       )}
 
-                      {/* 기본 OCR 결과도 없고 영역별 결과도 없는 경우 */}
-                      {(!analysisResult.ocr_results || analysisResult.ocr_results.length === 0) && 
-                       !analysisResult.region_results && (
+                      {/* 영역별 결과가 없는 경우 */}
+                      {!analysisResult.region_results && (
                         <Box sx={{ textAlign: 'center', py: 3 }}>
                           <Typography color="text.secondary" sx={{ mb: 1 }}>
                             OCR 인식 결과가 없습니다.

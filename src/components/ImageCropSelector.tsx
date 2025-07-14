@@ -132,9 +132,25 @@ const ImageCropSelector: React.FC<ImageCropSelectorProps> = ({
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isDragging || dragIndex === -1) return;
     const mousePos = getMousePos(e);
-    const newCorners = [...corners];
-    newCorners[dragIndex] = mousePos;
-    setCorners(newCorners);
+    const clampedX = Math.max(0, Math.min(mousePos.x, imageSize.width));
+    const clampedY = Math.max(0, Math.min(mousePos.y, imageSize.height));
+
+    setCorners(prev => {
+      let newCorners = [...prev];
+      // 대각선 인덱스
+      const diagIdx = (dragIndex + 2) % 4;
+      // 나머지 두 꼭짓점 인덱스
+      const idxA = (dragIndex + 1) % 4;
+      const idxB = (dragIndex + 3) % 4;
+      // 대각선 꼭짓점은 고정
+      newCorners[dragIndex] = { x: clampedX, y: clampedY };
+      // idxA: x는 drag, y는 diag
+      newCorners[idxA] = { x: clampedX, y: prev[diagIdx].y };
+      // idxB: x는 diag, y는 drag
+      newCorners[idxB] = { x: prev[diagIdx].x, y: clampedY };
+      // diagIdx는 고정
+      return newCorners;
+    });
   };
 
   const handleMouseUp = () => {
@@ -205,7 +221,7 @@ const ImageCropSelector: React.FC<ImageCropSelectorProps> = ({
     <Paper elevation={3} sx={{ p: 3 }}>
       <Typography variant="h6" gutterBottom>분석 영역 선택</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        이미지의 4개 모서리를 드래그하여 분석할 영역을 선택하세요. 기울기가 자동으로 보정됩니다.
+        이미지의 4개 모서리를 드래그하여 분석할 영역을 선택하세요. 직사각형 형태로 자동 조정되며, 기울기가 자동으로 보정됩니다.
       </Typography>
 
       <Box sx={{ mb: 3, textAlign: 'center' }}>

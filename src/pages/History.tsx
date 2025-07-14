@@ -181,7 +181,6 @@ const History = () => {
       id: string;
       drawNumber: number | null;
       purchaseDate: string;
-      type: string;
       numbers: number[];
       result: string;
       prize: string;
@@ -212,7 +211,6 @@ const History = () => {
           id: `${analysis.id}-${idx}`,
           drawNumber,
           purchaseDate,
-          type: '자동', // OCR에서 자동/수동 구분이 어려우므로 기본값
           numbers,
           result: !drawNumber ? '회차 정보 없음' : 
                   !winningNumbersCache.has(drawNumber) ? '미추첨' : 
@@ -344,9 +342,6 @@ const History = () => {
                         <TableCell align="center" sx={{ fontWeight: 'bold', minWidth: 100 }}>
                           구매일
                         </TableCell>
-                        <TableCell align="center" sx={{ fontWeight: 'bold', minWidth: 80 }}>
-                          구분
-                        </TableCell>
                         <TableCell align="center" sx={{ fontWeight: 'bold', minWidth: 280 }}>
                           번호
                         </TableCell>
@@ -366,13 +361,6 @@ const History = () => {
                           </TableCell>
                           <TableCell align="center">
                             {row.purchaseDate}
-                          </TableCell>
-                          <TableCell align="center">
-                            <Chip
-                              label={row.type}
-                              color="primary"
-                              size="small"
-                            />
                           </TableCell>
                           <TableCell align="center">
                             <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center', flexWrap: 'wrap' }}>
